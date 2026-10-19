@@ -42,9 +42,58 @@ from models.sit import SiT
 from models.ms_sit import MSSiT
 from models.ms_sit_shifted import MSSiT_shifted
 
-from tools.utils import load_weights_imagenet, get_dataloaders_numpy, get_dataloaders_metrics
+from tools.utils import load_weights_imagenet, get_dataloaders_metrics
 
 from torch.utils.tensorboard import SummaryWriter
+
+
+def get_dataloaders_numpy(data_path, bs, bs_val):
+    #loading already processed and patched cortical surfaces. 
+
+    train_data = np.load(os.path.join(data_path,'train_data.npy'))
+    train_label = np.load(os.path.join(data_path,'train_labels.npy'))
+
+    print('training data: {}'.format(train_data.shape))
+
+    val_data = np.load(os.path.join(data_path,'validation_data.npy'))
+    val_label = np.load(os.path.join(data_path,'validation_labels.npy'))
+
+    print('validation data: {}'.format(val_data.shape))
+
+    train_data_dataset = torch.utils.data.TensorDataset(torch.from_numpy(train_data).float(),
+                                                    torch.from_numpy(train_label).float())
+
+    train_loader = torch.utils.data.DataLoader(train_data_dataset,
+                                                    batch_size = bs,
+                                                    shuffle=True,
+                                                    num_workers=16)
+    
+    val_data_dataset = torch.utils.data.TensorDataset(torch.from_numpy(val_data).float(),
+                                                    torch.from_numpy(val_label).float())
+
+ 
+    val_loader = torch.utils.data.DataLoader(val_data_dataset,
+                                            batch_size = bs_val,
+                                            shuffle=False,
+                                            num_workers=16)
+    
+    test_data = np.load(os.path.join(data_path,'test_data.npy'))
+    test_label = np.load(os.path.join(data_path,'test_labels.npy')).reshape(-1)
+
+    print('testing data: {}'.format(test_data.shape))
+    print('')
+
+    test_data_dataset = torch.utils.data.TensorDataset(torch.from_numpy(test_data).float(),
+                                                    torch.from_numpy(test_label).float())
+
+    test_loader = torch.utils.data.DataLoader(test_data_dataset,
+                                            batch_size = bs_val,
+                                            shuffle=False,
+                                            num_workers=16)
+    
+    return train_loader, val_loader, test_loader
+
+
 
 
 def train(config):
@@ -58,7 +107,7 @@ def train(config):
     #data
     dataset = config['data']['dataset']
     task = config['data']['task']
-    loader_type = config['data']['loader']
+    loader_type = 'numpy'
 
     if task == 'sex':
         classification_task = True
@@ -74,8 +123,8 @@ def train(config):
     testing = config['training']['testing']
     bs = config['training']['bs']
     bs_val = config['training']['bs_val']
-    configuration = config['data']['configuration']
     task = config['data']['task']
+
 
     folder_to_save_model = config['logging']['folder_to_save_model']
     
@@ -111,11 +160,11 @@ def train(config):
     print('LOADING DATA: ICO {} - sub-res ICO {}'.format(ico_mesh,ico_grid))
 
     if loader_type == 'numpy':
-        data_path = config['data']['path_to_numpy'].format(ico_grid,task,configuration)
+        data_path = "/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/HCP_YA"
         train_loader, val_loader, test_loader = get_dataloaders_numpy(data_path, testing, bs, bs_val)
 
     elif loader_type == 'metrics':
-        data_path = config['data']['path_to_metrics'].format(dataset,configuration)
+        data_path = config['data']['path_to_metrics'].format(dataset)
         train_loader, val_loader, test_loader = get_dataloaders_metrics(config,data_path)
     
     ##############################
