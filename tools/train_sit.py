@@ -11,9 +11,6 @@
 
 '''
 This file implements the training procedure to train a SiT/MS-SiT model.
-Models can be either trained:
-    - from scratch
-    - from pretrained weights (after self-supervision or ImageNet for instance)
 Models can be trained for two tasks:
     - age at scan prediction
     - birth age prediction
@@ -39,9 +36,10 @@ import numpy as np
 import pandas as pd
 
 from models.sit import SiT
-from tools.utils import load_weights_imagenet, get_dataloaders_metrics
 
 from torch.utils.tensorboard import SummaryWriter
+
+
 
 
 def get_dataloaders(data_path, bs, bs_val):
@@ -91,18 +89,22 @@ def get_dataloaders(data_path, bs, bs_val):
     return train_loader, val_loader, test_loader
 
 
-
-
 def train(config):
 
     #mesh_resolution
     ico_res = config['mesh_resolution']['ico_res']
     ico_down_res = config['mesh_resolution']['ico_down_res']
-    num_patches = config['sub_ico_{}'.format(ico_res)]['num_patches']
+    num_patches = config['sub_ico_{}'.format(ico_down_res)]['num_patches']
     num_vertices = config['sub_ico_{}'.format(ico_down_res)]['num_vertices']
 
     #data
     task = config['data']['task']
+    testing_task = config['data']['testing_task']
+    if testing_task == 'sex':
+        classification_task = True
+    else: 
+        classification_task = False
+
 
     #training
     gpu = config['training']['gpu']
@@ -149,7 +151,7 @@ def train(config):
 
 
     data_path = "/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/HCP_YA"
-    train_loader, val_loader, test_loader = get_dataloaders(data_path, testing, bs, bs_val)
+    train_loader, val_loader, test_loader = get_dataloaders(data_path, bs, bs_val)
 
     ##############################
     ######      LOGGING     ######
@@ -207,18 +209,6 @@ def train(config):
                         dropout=config['transformer']['dropout'],
                         emb_dropout=config['transformer']['emb_dropout'])
         
-    #if config['training']['load_weights_ssl']:
-
-    #    print('Loading weights from self-supervision training')
-    #    model.load_state_dict(torch.load(config['weights']['ssl_mpp'],map_location=device),strict=False)
-    
-    #if config['training']['load_weights_imagenet']:
-
-    #    print('Loading weights from imagenet pretraining')
-    #    model_trained = timm.create_model(config['weights']['imagenet'], pretrained=True)
-    #    new_state_dict = load_weights_imagenet(model.state_dict(),model_trained.state_dict(),config['transformer']['depth'])
-    #    model.load_state_dict(new_state_dict)
-    
     model.to(device)
 
     if config['optimisation']['optimiser']=='Adam':
@@ -238,17 +228,16 @@ def train(config):
     else:
         raise('not implemented yet')
 
+    
 
-    if loss == 'mse':
-        criterion = nn.MSELoss(reduction='mean')
-    elif loss == 'l1':
-        criterion = nn.L1Loss(reduction='mean')
+    if classification_task:  
+        criterion = nn.BCEWithLogitsLoss(reduction='mean')
+    else:
+        if loss == 'mse':
+            criterion = nn.MSELoss(reduction='mean')
+        elif loss == 'l1':
+            criterion = nn.L1Loss(reduction='mean')
 
-
-
-    best_mae = 100000000
-    mae_val_epoch = 100000000
-    running_val_loss = 100000000
 
     print('Number of parameters: {:,}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
     print('')
@@ -265,6 +254,11 @@ def train(config):
     print('#'*30)
     print('')
 
+
+    best_mae = 100000000
+    mae_val_epoch = 100000000
+    running_val_loss = 100000000
+
     for epoch in range(epochs):
 
         running_loss = 0
@@ -280,17 +274,18 @@ def train(config):
 
             optimizer.zero_grad()
 
-            outputs = model(inputs)
+            outputs = model(inputs).view(-1)
 
-            loss = criterion(outputs.squeeze(), targets)
+            loss = criterion(outputs, targets.float().view(-1))
 
             loss.backward()
             optimizer.step()
 
             running_loss += loss.item()
             
-            targets_.append(targets.cpu().numpy())
-            preds_.append(outputs.reshape(-1).cpu().detach().numpy())
+            targets_.append(targets.view(-1).cpu().numpy())
+            preds_.append(outputs.detach().cpu().numpy())
+
 
             writer.add_scalar('loss/train', loss.item(), epoch+1)
         
@@ -320,15 +315,15 @@ def train(config):
 
                     inputs, targets = data[0].to(device), data[1].to(device)
 
-                    outputs = model(inputs)
+                    outputs = model(inputs).view(-1)
                     #import pdb;pdb.set_trace()
 
-                    loss = criterion(outputs.squeeze(1), targets)
+                    loss = criterion(outputs, targets.float().view(-1))
 
                     running_val_loss += loss.item()
 
-                    targets_.append(targets.cpu().numpy())
-                    preds_.append(outputs.reshape(-1).cpu().numpy())
+                    targets_.append(targets.view(-1).cpu().numpy())
+                    preds_.append(outputs.detach().cpu().numpy())
 
             writer.add_scalar('loss/val', running_val_loss, epoch+1)
 
@@ -343,8 +338,8 @@ def train(config):
                 best_epoch = epoch+1
 
                 df = pd.DataFrame()
-                df['preds'] = np.concatenate(preds_).reshape(-1)
-                df['targets'] = np.concatenate(targets_).reshape(-1)
+                df['preds'] = np.concatenate(preds_)
+                df['targets'] = np.concatenate(targets_)
                 df.to_csv(os.path.join(folder_to_save_model, 'preds_test.csv'))
 
                 config['logging']['folder_model_saved'] = folder_to_save_model
@@ -369,7 +364,7 @@ def train(config):
     config['results']['best_mae'] = float(best_mae)
     config['results']['best_epoch'] = best_epoch
     config['results']['training_finished'] = True 
-    
+        
     ##############################
     ######     TESTING      ######
     ##############################
@@ -415,11 +410,13 @@ def train(config):
 
                 inputs, targets = data[0].to(device), data[1].to(device)
 
-                outputs = test_model(inputs)
+                outputs = test_model(inputs).view(-1)
 
-                targets_.append(targets.cpu().numpy())
-                preds_.append(outputs.reshape(-1).cpu().numpy())
+                targets_.append(targets.view(-1).cpu().numpy())
+                preds_.append(outputs.detach().cpu().numpy())
 
+
+            
             mae_test_epoch = np.mean(np.abs(np.concatenate(targets_)- np.concatenate(preds_)))
 
             print('| TESTING RESULTS | MAE - {:.4f} |'.format( mae_test_epoch ))
@@ -430,8 +427,8 @@ def train(config):
                 yaml.dump(config, yaml_file)
 
             df = pd.DataFrame()
-            df['preds'] = np.concatenate(preds_).reshape(-1)
-            df['targets'] = np.concatenate(targets_).reshape(-1)
+            df['preds'] = np.concatenate(preds_)
+            df['targets'] = np.concatenate(targets_)
             df.to_csv(os.path.join(folder_to_save_model, 'preds_test.csv'))
 
     else:
@@ -441,7 +438,7 @@ def train(config):
 
 
 if __name__ == '__main__':
-
+    '''
     parser = argparse.ArgumentParser(description='ViT')
 
     parser.add_argument(
@@ -452,8 +449,12 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
 
-    with open(args.config) as f:
+    '''
+
+
+    config_file = "/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/SiT_structural_encoder/config/SiT/training/hparams_sit.yml"
+    with open(config_file) as f:
         config = yaml.safe_load(f)
-        
+          
     # Call training
-    #train(config)
+    train(config)
