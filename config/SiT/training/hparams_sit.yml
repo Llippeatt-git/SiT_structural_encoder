@@ -10,30 +10,23 @@ mesh_resolution:
 data:
   path_to_workdir: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/HCP_YA
   task: scan_age #scan_age # birth_age
+  testing_task: sex
 
 logging:
-  folder_to_save_model: ../logs/SiT/
+  folder_to_save_model: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/logs/SiT
 
 training:
   LR: 0.0001
   bs: 32
   bs_val: 1 #always 1
-  epochs: 200
+  epochs: 100
   gpu: 0
   loss: mse #mse, l1
   testing: True
-  val_epoch: 10
-  load_weights_ssl: False
-  load_weights_imagenet: False
+  val_epoch: 2
   save_ckpt: True
   finetuning: True
 
-weights: 
-  ssl_mpp: '..' # path to .pt checkpoint
-  imagenet: 'vit_tiny_patch16_224' #ViT(dim=192, depth=12, heads=3,mlp_dim=768,dim_head=64)
-  #imagenet: 'vit_small_patch16_224' #ViT(dim=384, depth=12, heads=6,mlp_dim=1536,dim_head=64)
-  #imagenet: 'vit_base_patch16_224' #ViT(dim=768, depth=12, heads=12,mlp_dim=3072,dim_head=64)
-            
 transformer:
   dim: 192 #192, 384, 768
   depth: 12 #12, 12, 12
@@ -41,14 +34,14 @@ transformer:
   mlp_dim: 768 #768, 1536, 3072 ## 4*dim according to DeiT
   pool: 'cls'  # or 'mean'
   num_classes: 1
-  num_channels: 4
+  num_channels: 1
   dim_head: 64 #64
   dropout: 0.0
   emb_dropout: 0.0
   model: SiT
 
 optimisation:
-  optimiser: SGD #Adam, AdamW, SGD
+  optimiser: AdamW #Adam, AdamW, SGD
 
 Adam:
   weight_decay: 0.

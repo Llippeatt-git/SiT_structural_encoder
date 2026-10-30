@@ -38,22 +38,50 @@ import pandas as pd
 from models.sit import SiT
 
 from torch.utils.tensorboard import SummaryWriter
-
+from sklearn.metrics import roc_auc_score
 
 
 
 def get_dataloaders(data_path, bs, bs_val):
-    #loading already processed and patched cortical surfaces. 
+    # loading and normalizing already processed and patched cortical surfaces. 
 
     train_data = np.load(os.path.join(data_path,'train_data.npy'))
     train_label = np.load(os.path.join(data_path,'train_labels.npy'))
 
-    print('training data: {}'.format(train_data.shape))
+    mean = train_data.mean()
+    std = train_data.std()
+    print(f'train mean: {mean:.4f} | std: {std:.4f}\n')
+
+    
 
     val_data = np.load(os.path.join(data_path,'validation_data.npy'))
     val_label = np.load(os.path.join(data_path,'validation_labels.npy'))
 
+    
+
+
+    test_data = np.load(os.path.join(data_path,'test_data.npy'))
+    test_label = np.load(os.path.join(data_path,'test_labels.npy')).reshape(-1)
+    
+
+    eps = 1e-8
+    train_data = (train_data - mean) / (std + eps)
+    val_data   = (val_data   - mean) / (std + eps)
+    test_data  = (test_data  - mean) / (std + eps)
+
+
+    ## for overfit testing
+    #train_data = train_data[:64]
+    #train_label = train_label[:64]
+    #val_data = train_data
+    #val_label = train_label
+    #test_data = train_data
+    #test_data = train_label
+
+    print('training data: {}'.format(train_data.shape))
     print('validation data: {}'.format(val_data.shape))
+    print('testing data: {}'.format(test_data.shape))
+    print('')
 
     train_data_dataset = torch.utils.data.TensorDataset(torch.from_numpy(train_data).float(),
                                                     torch.from_numpy(train_label).float())
@@ -71,12 +99,6 @@ def get_dataloaders(data_path, bs, bs_val):
                                             batch_size = bs_val,
                                             shuffle=False,
                                             num_workers=16)
-    
-    test_data = np.load(os.path.join(data_path,'test_data.npy'))
-    test_label = np.load(os.path.join(data_path,'test_labels.npy')).reshape(-1)
-
-    print('testing data: {}'.format(test_data.shape))
-    print('')
 
     test_data_dataset = torch.utils.data.TensorDataset(torch.from_numpy(test_data).float(),
                                                     torch.from_numpy(test_label).float())
@@ -99,11 +121,6 @@ def train(config):
 
     #data
     task = config['data']['task']
-    testing_task = config['data']['testing_task']
-    if testing_task == 'sex':
-        classification_task = True
-    else: 
-        classification_task = False
 
 
     #training
@@ -230,14 +247,9 @@ def train(config):
 
     
 
-    if classification_task:  
-        criterion = nn.BCEWithLogitsLoss(reduction='mean')
-    else:
-        if loss == 'mse':
-            criterion = nn.MSELoss(reduction='mean')
-        elif loss == 'l1':
-            criterion = nn.L1Loss(reduction='mean')
-
+    
+    criterion = nn.BCEWithLogitsLoss(reduction='mean')
+    
 
     print('Number of parameters: {:,}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
     print('')
@@ -255,9 +267,12 @@ def train(config):
     print('')
 
 
-    best_mae = 100000000
-    mae_val_epoch = 100000000
+    #best_mae = 100000000
+    #mae_val_epoch = 100000000
     running_val_loss = 100000000
+    best_auc = -1
+    best_acc = -1
+    best_epoch = 0
 
     for epoch in range(epochs):
 
@@ -289,12 +304,18 @@ def train(config):
 
             writer.add_scalar('loss/train', loss.item(), epoch+1)
         
-        mae_epoch = np.mean(np.abs(np.concatenate(targets_) - np.concatenate(preds_)))
+        #mae_epoch = np.mean(np.abs(np.concatenate(targets_) - np.concatenate(preds_)))
 
-        writer.add_scalar('mae/train',mae_epoch, epoch+1)
+        auc = roc_auc_score(np.concatenate(targets_), np.concatenate(preds_))
+        acc = ((np.concatenate(preds_) > 0.5) == np.concatenate(targets_)).mean()
+
+        writer.add_scalar('auc/train',auc, epoch+1)
+        writer.add_scalar('acc/train',acc, epoch+1)
         
         if (epoch+1)%5==0:
-            print('| Epoch - {} | Loss - {:.4f} | MAE - {:.4f} | LR - {}'.format(epoch+1, running_loss/(i+1), round(mae_epoch,4), optimizer.param_groups[0]['lr']))
+            #print('| Epoch - {} | Loss - {:.4f} | MAE - {:.4f} | LR - {}'.format(epoch+1, running_loss/(i+1), round(mae_epoch,4), optimizer.param_groups[0]['lr']))
+            print('| training Epoch - {} | Loss - {:.4f} | AUC - {:.4f} | ACC - {:.4f} |'.format(epoch+1, running_loss/(i+1), round(auc,4), round(acc, 4)))
+            
 
         ##############################
         ######    VALIDATION    ######
@@ -325,17 +346,28 @@ def train(config):
                     targets_.append(targets.view(-1).cpu().numpy())
                     preds_.append(outputs.detach().cpu().numpy())
 
-            writer.add_scalar('loss/val', running_val_loss, epoch+1)
+            writer.add_scalar('loss/val', running_val_loss/(i+1), epoch+1)
 
-            mae_val_epoch = np.mean(np.abs(np.concatenate(targets_)- np.concatenate(preds_)))
+            #mae_val_epoch = np.mean(np.abs(np.concatenate(targets_)- np.concatenate(preds_)))
 
-            writer.add_scalar('mae/val',mae_val_epoch, epoch+1)
+            #writer.add_scalar('mae/val',mae_val_epoch, epoch+1)
 
-            print('| Validation | Epoch - {} | Loss - {:.4f} | MAE - {:.4f} |'.format(epoch+1, running_val_loss, mae_val_epoch ))
+            val_auc = roc_auc_score(np.concatenate(targets_), np.concatenate(preds_))
+            val_acc = ((np.concatenate(preds_) > 0.5) == np.concatenate(targets_)).mean()
 
+            writer.add_scalar('auc/val',val_auc, epoch+1)
+            writer.add_scalar('acc/val',val_acc, epoch+1)
+
+
+            #print('| Validation | Epoch - {} | Loss - {:.4f} | MAE - {:.4f} |'.format(epoch+1, running_val_loss/(i+1), mae_val_epoch ))
+            print('| validation Epoch - {} | Loss - {:.4f} | AUC - {:.4f} | ACC - {:.4f} |'.format(epoch+1, running_val_loss/(i+1), round(val_auc,4), round(val_acc, 4)))
+            '''
             if mae_val_epoch < best_mae:
                 best_mae = mae_val_epoch
                 best_epoch = epoch+1
+            '''
+            if best_auc < val_auc:
+                best_auc, best_acc, best_epoch = val_auc, val_acc, epoch + 1
 
                 df = pd.DataFrame()
                 df['preds'] = np.concatenate(preds_)
@@ -344,7 +376,9 @@ def train(config):
 
                 config['logging']['folder_model_saved'] = folder_to_save_model
                 config['results'] = {}
-                config['results']['best_mae'] = float(best_mae)
+                #config['results']['best_mae'] = float(best_mae)
+                config['results']['best_auc'] = best_auc
+                config['results']['best_acc'] = val_acc
                 config['results']['best_epoch'] = best_epoch
                 config['results']['training_finished'] = False 
 
@@ -356,12 +390,14 @@ def train(config):
                     torch.save(model.state_dict(), os.path.join(folder_to_save_model,'checkpoint.pth'))
 
     
-    print('Final results: best model obtained at epoch {} - mean absolute error {}'.format(best_epoch,best_mae))
+    print('Final results: best model obtained at epoch {} - auc {} - acc {}'.format(best_epoch,best_auc, best_acc))
     torch.save(model.state_dict(), os.path.join(folder_to_save_model,'model_final.pth'))
 
     config['logging']['folder_model_saved'] = folder_to_save_model
     config['results'] = {}
-    config['results']['best_mae'] = float(best_mae)
+    #config['results']['best_mae'] = float(best_mae)
+    config['results']['best_auc'] = best_auc
+    config['results']['best_acc'] = best_acc
     config['results']['best_epoch'] = best_epoch
     config['results']['training_finished'] = True 
         
@@ -417,11 +453,16 @@ def train(config):
 
 
             
-            mae_test_epoch = np.mean(np.abs(np.concatenate(targets_)- np.concatenate(preds_)))
+            #mae_test_epoch = np.mean(np.abs(np.concatenate(targets_)- np.concatenate(preds_)))
+            test_auc = roc_auc_score(np.concatenate(targets_), np.concatenate(preds_))
+            test_acc = ((np.concatenate(preds_) > 0.5) == np.concatenate(targets_)).mean()
+            
 
-            print('| TESTING RESULTS | MAE - {:.4f} |'.format( mae_test_epoch ))
+            #print('| TESTING RESULTS | MAE - {:.4f} |'.format( mae_test_epoch ))
+            print('| TESTING RESULTS | auc - {:.4f} | acc - {:.4f} |'.format( test_auc , test_acc))
 
-            config['results']['testing'] = float(mae_test_epoch)
+            config['results']['testing_auc'] = float(test_auc)
+            config['results']['testing_acc'] = float(test_acc)
 
             with open(os.path.join(folder_to_save_model,'hparams.yml'), 'w') as yaml_file:
                 yaml.dump(config, yaml_file)
