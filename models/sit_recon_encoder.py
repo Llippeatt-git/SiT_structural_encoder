@@ -72,6 +72,7 @@ class SiT(nn.Module):
 
         self.rearrange_out = Rearrange('b n (v c) -> b c n v', c=num_channels)
 
+
     def encode(self, img):
         x = self.to_patch_embedding(img)
         b, n, _ = x.shape

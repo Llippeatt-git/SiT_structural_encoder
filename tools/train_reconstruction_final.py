@@ -38,19 +38,23 @@ import pandas as pd
 from models.sit_recon_encoder import SiT
 
 from torch.utils.tensorboard import SummaryWriter
+from scipy.stats import pearsonr
 
 
 
-
-def get_dataloaders(data_path, bs, bs_val):
+def get_dataloaders(data_path, config):
     # loading and normalizing already processed and patched cortical surfaces. 
+
+    bs = config['training']['bs']
+    bs_val = config['training']['bs_val']
+    demeaned = config['training']['demeaned']
 
     train_data = np.load(os.path.join(data_path,'train_data.npy'))
     #train_label = np.load(os.path.join(data_path,'train_labels.npy'))
 
-    mean = train_data.mean()
-    std = train_data.std()
-    print(f'train mean: {mean:.4f} | std: {std:.4f}\n')
+    mean = train_data.mean(axis=0, keepdims=True)
+    std = train_data.std(axis=0, keepdims=True)
+    print(f'train mean dims: {mean.shape}')
 
     
 
@@ -62,14 +66,20 @@ def get_dataloaders(data_path, bs, bs_val):
     #test_label = np.load(os.path.join(data_path,'test_labels.npy')).reshape(-1)
     
 
+    ## demeaning happens here
+    # since this is reconstruction, demeaned input is propagated across the model to output
     eps = 1e-8
-    train_data = (train_data - mean) / (std + eps)
-    val_data   = (val_data   - mean) / (std + eps)
-    test_data  = (test_data  - mean) / (std + eps)
+    if demeaned:
+        train_data = (train_data - mean) / (std + eps)
+        val_data   = (val_data   - mean) / (std + eps)
+        test_data  = (test_data  - mean) / (std + eps)
+
+    print(f"demeaned : {demeaned}")
+    print(f"trained data sample : {train_data[0][0:10]}")
 
 
     ## for overfit testing
-    train_data = train_data[:64]
+    train_data = train_data[:32]
     #train_label = train_label[:64]
     val_data = train_data
     #val_label = train_label
@@ -103,10 +113,26 @@ def get_dataloaders(data_path, bs, bs_val):
                                             shuffle=False,
                                             num_workers=16)
     
-    return train_loader, val_loader, test_loader
+    return train_loader, val_loader, test_loader, mean
 
 
-def train(config):
+## per-subject pearson correlation
+def calculate_correlation(target, predicted):
+    t = np.concatenate(target)
+    p = np.concatenate(predicted)
+    n_subjects = t.shape[0]
+
+    t = t.reshape(n_subjects, -1)   # already demeaned
+    p = p.reshape(n_subjects, -1)     # demeaned the same way
+
+    r = pearsonr(t, p, axis=1).statistic
+
+    r_mean = np.tanh(np.arctanh(r).mean())   # Fisher-z average
+    #print(f"shameen : {r_mean}")
+
+    return r_mean
+
+def train(config, notes=None):
 
     #mesh_resolution
     ico_res = config['mesh_resolution']['ico_res']
@@ -124,10 +150,10 @@ def train(config):
     loss = config['training']['loss']
     epochs = config['training']['epochs']
     val_epoch = config['training']['val_epoch']
-    testing = config['training']['testing']
     bs = config['training']['bs']
     bs_val = config['training']['bs_val']
 
+    demeaned = config['training']['demeaned']
 
     folder_to_save_model = config['logging']['folder_to_save_model']
     
@@ -163,7 +189,7 @@ def train(config):
 
 
     data_path = "/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/HCP_YA"
-    train_loader, val_loader, test_loader = get_dataloaders(data_path, bs, bs_val)
+    train_loader, val_loader, test_loader, train_mean = get_dataloaders(data_path, config)
 
     ##############################
     ######      LOGGING     ######
@@ -180,15 +206,20 @@ def train(config):
     # folder time
     folder_to_save_model = os.path.join(folder_to_save_model,date)
     print(folder_to_save_model)
-    if config['transformer']['dim'] == 192:
-        folder_to_save_model = folder_to_save_model + '-small'
-    elif config['transformer']['dim'] == 384:
-        folder_to_save_model = folder_to_save_model + '-medium'
-    elif config['transformer']['dim'] == 768:
-        folder_to_save_model = folder_to_save_model + '-large'
+    if demeaned:
+        folder_to_save_model = folder_to_save_model + '-demeaned'
+    else:
+        if config['transformer']['dim'] == 192:
+            folder_to_save_model = folder_to_save_model + '-small'
+        elif config['transformer']['dim'] == 384:
+            folder_to_save_model = folder_to_save_model + '-medium'
+        elif config['transformer']['dim'] == 768:
+            folder_to_save_model = folder_to_save_model + '-large'
 
-    folder_to_save_model = folder_to_save_model + '-recon'
-    
+        folder_to_save_model = folder_to_save_model + '-recon'
+
+    folder_to_save_model = folder_to_save_model + f'-{notes}'
+
     if not os.path.exists(folder_to_save_model):
         os.mkdir(folder_to_save_model)
         print('Creating folder: {}'.format(folder_to_save_model))
@@ -221,9 +252,17 @@ def train(config):
                         dim_head=config['transformer']['dim_head'],
                         dropout=config['transformer']['dropout'],
                         emb_dropout=config['transformer']['emb_dropout'])
+
+    if config['training']['init_weights']=='recon':
+        print('Loading weights from self-supervision training SiT')
+        model.load_state_dict(torch.load(os.path.join(config['training']['weights_source'],'best_model.pth'))['model_state_dict'],strict=True)
+    else:
+        print('Training from scratch')
+
         
     model.to(device)
 
+    
     if config['optimisation']['optimiser']=='Adam':
         print('using Adam optimiser')
         optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=config['Adam']['weight_decay'])
@@ -266,17 +305,18 @@ def train(config):
 
     best_mae = float('inf')
     best_epoch = None
+    best_corr = -1
 
     for epoch in range(epochs):
 
         # ---------------- TRAINING ----------------
         model.train()
 
-        train_abs_error = 0.0
-        train_numel = 0
+        targets_ = []
+        preds_ = []
         train_loss_sum = 0.0
 
-        for data in train_loader:
+        for i, data in enumerate(train_loader):
             inputs = data[0].to(device).float()
 
             optimizer.zero_grad(set_to_none=True)
@@ -287,34 +327,34 @@ def train(config):
             loss_value.backward()
             optimizer.step()
 
-            n = inputs.numel()
-            train_loss_sum += loss_value.item() * n
-            train_abs_error += (
-                outputs.detach() - inputs
-            ).abs().sum().item()
-            train_numel += n
+            train_loss_sum += loss_value.item()
 
-        if train_numel == 0:
-            raise RuntimeError("Training loader is empty.")
+            targets_.append(inputs.cpu().numpy())
+            preds_.append(outputs.cpu().detach().numpy())
 
-        train_loss = train_loss_sum / train_numel
-        train_mae = train_abs_error / train_numel
+
+        train_loss = train_loss_sum / (i + 1)
+        train_mae = np.mean(np.abs(np.concatenate(targets_)- np.concatenate(preds_)))
+
+        train_corr = calculate_correlation(targets_, preds_)
 
         writer.add_scalar('loss/train', train_loss, epoch + 1)
         writer.add_scalar('mae/train', train_mae, epoch + 1)
+        writer.add_scalar('corr/train', train_corr, epoch + 1)
 
         # ---------------- VALIDATION ----------------
         if (epoch + 1) % val_epoch == 0 or epoch == epochs - 1:
 
             model.eval()
 
-            val_abs_error = 0.0
-            val_numel = 0
+
+            val_targets_ = []
+            val_preds_ = []
             val_loss_sum = 0.0
 
             with torch.no_grad():
 
-                for data in val_loader:
+                for i, data in enumerate(val_loader):
 
                     inputs = data[0].to(device).float()
 
@@ -323,31 +363,36 @@ def train(config):
 
 
 
-                    n = inputs.numel()
-                    val_loss_sum += val_loss.item() * n
-                    val_abs_error += (
-                        outputs - inputs
-                    ).abs().sum().item()
-                    val_numel += n
+                    val_loss_sum += val_loss.item()
+
+                    val_targets_.append(inputs.cpu().numpy())
+                    val_preds_.append(outputs.cpu().detach().numpy())
+
+            val_loss = val_loss_sum / (i + 1)
+            val_mae = np.mean(np.abs(np.concatenate(val_targets_)- np.concatenate(val_preds_)))
 
 
-            val_loss_mean = val_loss_sum / val_numel
-            val_mae = val_abs_error / val_numel
-
-            writer.add_scalar('loss/val', val_loss_mean, epoch + 1)
+            ## subject-level correlations
+            val_corr = calculate_correlation(val_targets_, val_preds_)
+            
+            writer.add_scalar('loss/val', val_loss, epoch + 1)
             writer.add_scalar('mae/val', val_mae, epoch + 1)
+            writer.add_scalar('corr/val', val_corr, epoch + 1)
 
             print(
                 f'Epoch {epoch + 1}/{epochs} | '
                 f'Train loss: {train_loss:.6f} | '
                 f'Train MAE: {train_mae:.6f} | '
-                f'Val loss: {val_loss_mean:.6f} | '
-                f'Val MAE: {val_mae:.6f}'
+                f'Train corr: {train_corr:.6f} | '
+                f'Val loss: {val_loss:.6f} | '
+                f'Val MAE: {val_mae:.6f} | '
+                f'Val corr: {val_corr:.6f}'
             )
 
             # Save the best model
             if val_mae < best_mae:
                 best_mae = val_mae
+                best_corr = val_corr
                 best_epoch = epoch + 1
 
                 torch.save(
@@ -360,13 +405,15 @@ def train(config):
 
     print(
         f'Best model: epoch {best_epoch}, '
-        f'validation MAE {best_mae:.6f}'
+        f'validation MAE {best_mae:.6f}, '
+        f'validation Corr {best_corr:.6f}'
     )
 
 
     config['logging']['folder_model_saved'] = folder_to_save_model
     config['results'] = {}
     config['results']['best_mae'] = float(best_mae)
+    config['results']['best_corr'] = float(best_corr)
     config['results']['best_epoch'] = best_epoch
     config['results']['training_finished'] = False 
 
@@ -383,66 +430,63 @@ def train(config):
     ######     TESTING      ######
     ##############################
 
-    if testing:
-        print('')
-        print('#'*30)
-        print('Starting testing')
-        print('#'*30)
-        print('')
+    print('')
+    print('#'*30)
+    print('Starting testing')
+    print('#'*30)
+    print('')
 
-        del model
-        torch.cuda.empty_cache()
+    del model
+    torch.cuda.empty_cache()
+    
+    if config['transformer']['model'] == 'SiT':
+
+        test_model = SiT(dim=config['transformer']['dim'],
+            depth=config['transformer']['depth'],
+            dec_depth=config['transformer']['dec_depth'],
+            heads=config['transformer']['heads'],
+            mlp_dim=config['transformer']['mlp_dim'],
+            latent_dim=config['transformer']['latent_dim'],
+            pool=config['transformer']['pool'], 
+            num_patches=num_patches,
+            num_channels=config['transformer']['num_channels'],
+            num_vertices=num_vertices,
+            dim_head=config['transformer']['dim_head'],
+            dropout=config['transformer']['dropout'],
+            emb_dropout=config['transformer']['emb_dropout'])
         
-        if config['transformer']['model'] == 'SiT':
+    print('**** loading checkpoint ****')
+    test_model.load_state_dict(torch.load(os.path.join(folder_to_save_model,'best_model.pth')))
 
-            test_model = SiT(dim=config['transformer']['dim'],
-                depth=config['transformer']['depth'],
-                dec_depth=config['transformer']['dec_depth'],
-                heads=config['transformer']['heads'],
-                mlp_dim=config['transformer']['mlp_dim'],
-                latent_dim=config['transformer']['latent_dim'],
-                pool=config['transformer']['pool'], 
-                num_patches=num_patches,
-                num_channels=config['transformer']['num_channels'],
-                num_vertices=num_vertices,
-                dim_head=config['transformer']['dim_head'],
-                dropout=config['transformer']['dropout'],
-                emb_dropout=config['transformer']['emb_dropout'])
-            
-        print('**** loading checkpoint ****')
-        test_model.load_state_dict(torch.load(os.path.join(folder_to_save_model,'best_model.pth')))
+    test_model.to(device)
 
-        test_model.to(device)
+    test_model.eval()
 
-        test_model.eval()
+    with torch.no_grad():
 
-        with torch.no_grad():
+        test_targets_ = []
+        test_preds_ = []
 
-            test_abs_error = 0.0
-            test_numel = 0
+        for data in test_loader:
 
-            for data in test_loader:
+            inputs = data[0].to(device).float()
 
-                inputs = data[0].to(device).float()
+            outputs = test_model(inputs)
 
-                outputs = test_model(inputs)
+            test_targets_.append(inputs.cpu().numpy())
+            test_preds_.append(outputs.cpu().detach().numpy())
 
-                n = inputs.numel()
-                test_abs_error += (
-                    outputs.detach() - inputs
-                ).abs().sum().item()
-                test_numel += n
+        test_mae = np.mean(np.abs(np.concatenate(test_targets_)- np.concatenate(test_preds_)))
 
-            test_mae = train_abs_error / train_numel
 
-            print('| TESTING RESULTS | MAE - {:.4f} |'.format( test_mae ))
+        ## correlation code
+        test_corr = calculate_correlation(test_targets_, test_preds_)
 
-            config['results']['testing'] = float(test_mae)
+        print('| TESTING RESULTS | MAE - {:.4f} | Corr - {:.4f}'.format( test_mae , test_corr))
 
-            with open(os.path.join(folder_to_save_model,'hparams.yml'), 'w') as yaml_file:
-                yaml.dump(config, yaml_file)
+        config['results']['test_accuracy'] = float(test_mae)
+        config['results']['test_correlation'] = float(test_corr)
 
-    else:
         with open(os.path.join(folder_to_save_model,'hparams.yml'), 'w') as yaml_file:
             yaml.dump(config, yaml_file)
 
@@ -461,10 +505,10 @@ if __name__ == '__main__':
 
     '''
 
-
+    notes = "overfit-case-high-epochs-high-learning"
     config_file = "/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/SiT_structural_encoder/config/SiT/training/hparams_recon.yml"
     with open(config_file) as f:
         config = yaml.safe_load(f)
           
     # Call training
-    train(config)
+    train(config, notes)

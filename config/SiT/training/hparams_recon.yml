@@ -14,26 +14,28 @@ data:
 
 logging:
   folder_to_save_model: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/logs/SiT
+  folder_to_save_recons: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/logs/SiT/recons
 
 training:
   LR: 0.001
   bs: 32
   bs_val: 1 #always 1
-  epochs: 100
+  epochs: 200
   gpu: 0
   loss: mse #mse, l1
-  testing: True
+  demeaned: True
+  correlation: per-subject # per-subject(/per hemisphere), per-vertex
   val_epoch: 2
-  save_ckpt: True
-  finetuning: True
-
+  init_weights: False
+  weights_source: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/logs/SiT/best_run_reconsit
+  
 transformer:
-  dim: 384 #192, 384, 768
+  dim: 192 #192, 384, 768
   depth: 12 #12, 12, 12
   dec_depth: 4 # 1 2 4 
   heads: 6 #3, 6, 12
-  latent_dim: 768
-  mlp_dim: 1536 #768, 1536, 3072 ## 4*dim according to DeiT
+  latent_dim: 1536
+  mlp_dim: 768 #768, 1536, 3072 ## 4*dim according to DeiT
   pool: 'cls'  # or 'mean'
   num_classes: 1
   num_channels: 1
