@@ -111,7 +111,7 @@ def train(config):
     # folder time
     folder_to_save_model = os.path.join(folder_to_save_model,date)
 
-    folder_to_save_model = f"{folder_to_save_model}-epoch_{epochs}-LR_{LR}-dims_{dim}"
+    folder_to_save_model = f"{folder_to_save_model}-epoch_{epochs}-LR_{LR}-dims_{dim}-optim_{config['optimisation']['optimiser']}"
 
     if not os.path.exists(folder_to_save_model):
         os.mkdir(folder_to_save_model)
@@ -231,7 +231,7 @@ def train(config):
         train_loss = train_loss_sum / (i + 1)
         train_mae = np.mean(np.abs(np.concatenate(targets_)- np.concatenate(preds_)))
 
-        train_corr = calculate_correlation(targets_, preds_)
+        train_corr = calculate_correlation(targets_, preds_).mean()
 
         writer.add_scalar('loss/train', train_loss, epoch + 1)
         writer.add_scalar('mae/train', train_mae, epoch + 1)
@@ -267,8 +267,8 @@ def train(config):
             val_mae = np.mean(np.abs(np.concatenate(val_targets_)- np.concatenate(val_preds_)))
 
 
-            ## subject-level correlations
-            val_corr = calculate_correlation(val_targets_, val_preds_)
+            ## mean of subject-level correlations
+            val_corr = calculate_correlation(val_targets_, val_preds_).mean()
             
             writer.add_scalar('loss/val', val_loss, epoch + 1)
             writer.add_scalar('mae/val', val_mae, epoch + 1)
@@ -375,7 +375,7 @@ def train(config):
 
 
         ## correlation code
-        test_corr = calculate_correlation(test_targets_, test_preds_)
+        test_corr = calculate_correlation(test_targets_, test_preds_).mean()
 
         print('| TESTING RESULTS | MAE - {:.4f} | Corr - {:.4f}'.format( test_mae , test_corr))
 
