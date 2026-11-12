@@ -212,7 +212,7 @@ def train(config):
         train_loss_sum = 0.0
 
         for i, data in enumerate(train_loader):
-            inputs = data[0].to(device).float()
+            inputs, labels, _ = data[0].to(device).float(), data[1].to(device).float(), data[2].to(device).float()
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -251,7 +251,7 @@ def train(config):
 
                 for i, data in enumerate(val_loader):
 
-                    inputs = data[0].to(device).float()
+                    inputs, labels, _ = data[0].to(device).float(), data[1].to(device).float(), data[2].to(device).float()
 
                     outputs = model(inputs)
                     val_loss = criterion(outputs, inputs)
@@ -364,7 +364,7 @@ def train(config):
 
         for data in test_loader:
 
-            inputs = data[0].to(device).float()
+            inputs, labels, _ = data[0].to(device).float(), data[1].to(device).float(), data[2].to(device).float()
 
             outputs = test_model(inputs)
 
