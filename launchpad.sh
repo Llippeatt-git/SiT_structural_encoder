@@ -8,10 +8,9 @@
 #SBATCH --cpus-per-task 8
 #SBATCH -t 0-6:00:00  
 
-source activate depression_decoding
 cd /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/SiT_structural_encoder/tools
 
-python3 ./train_reconstruction_final.py
+python3 ./reconstruction_pipeline.py
 
 done
 
