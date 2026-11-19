@@ -27,7 +27,6 @@ from datetime import datetime
 
 sys.path.append('./')
 sys.path.append('../')
-sys.path.append('../../')
 
 import torch
 import torch.nn as nn
@@ -387,21 +386,15 @@ def train(config):
 
 
 if __name__ == '__main__':
-    '''
-    parser = argparse.ArgumentParser(description='ViT')
 
-    parser.add_argument(
-                        'config',
-                        type=str,
-                        default='./config/hparams_sit.yml',
-                        help='path where the data is stored')
+    parser = argparse.ArgumentParser(description='SiT_structural_encoder')
+
+    parser.add_argument('--config', type=str, default='../config/hparams_recon.yml',
+                        help='path where the configs are stored')
     
     args = parser.parse_args()
-
-    '''
-
-    notes = "overfit-case-high-epochs-high-learning"
-    config_file = "/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/SiT_structural_encoder/config/SiT/training/hparams_recon.yml"
+    config_file = args.config
+    
     with open(config_file) as f:
         config = yaml.safe_load(f)
           

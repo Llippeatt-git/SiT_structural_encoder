@@ -6,11 +6,14 @@
 #SBATCH --account=janine_bijsterbosch 
 #SBATCH --mem-per-cpu 12G
 #SBATCH --cpus-per-task 8
-#SBATCH -t 0-6:00:00  
+#SBATCH -t 0-6:00:00
 
 cd /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/SiT_structural_encoder/tools
 
-python3 ./reconstruction_pipeline.py
+param_path="../config/hparams_recon.yml"
+
+
+python3 ./reconstruction_pipeline_v2.py --config "${param_path}"
 
 done
 
