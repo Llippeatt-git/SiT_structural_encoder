@@ -9,7 +9,7 @@ High-level development log.
 - [25 Oct – 31 Oct 2026: More reconstruction](#25-oct--31-oct-2026-more-reconstruction)
 - [1 Nov – 7 Nov 2026: Starting visualization](#1-nov--7-nov-2026-starting-visualization)
 - [8 Nov – 14 Nov 2026: Demeaning & taking point](#8-nov--14-nov-2026-demeaning--taking-point)
-- [19 Nov 2026: Readability and Organization][def](#19-nov-2026-readability-and-organization)
+- [19 Nov 2026: Readability and Organization](#19-nov-2026-readability-and-organization)
 
 
 
