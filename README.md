@@ -1,284 +1,247 @@
-# The Surface Vision Transformer family
+# SiT Structural Encoder — sMRI Surface Autoencoder
 
-This repository contains codebase to use surface vision transformers models on surface data (e.g cortical data). This repository contains the **official** PyTorch implementation of:
+This repo is the **structural MRI (sMRI) branch** of a lab project on depression. The project's goal is to translate between modalities: each modality (tabular behavioural data, sMRI, …) gets its own encoder that produces a latent space, and the latent spaces are then fused so one modality can be translated into another.
 
-- SiT -  [*The Surface Vision Transformers: Attention-Based Modelling applied to Cortical Analysis*](https://arxiv.org/abs/2203.16414) [MIDL2022]
+This repo builds a **transformer autoencoder for reconstruction** using cortical surface data from HCP Young Adult (HCP-YA). The encoder is a Surface Vision Transformer (SiT), forked from [metrics-lab/surface-vision-transformers](https://github.com/metrics-lab/surface-vision-transformers), with a transformer decoder added. Left-hemisphere surfaces are split into patches on an icosphere, compressed to a single latent vector, and reconstructed from it.
 
-- MS-SiT - [*The Multiscale Surface Vision Transformer*](https://arxiv.org/abs/2303.11909) [MIDL2024]
+> Status: work in progress. See `weekly_log.md` for the development history.
 
-<img src="./docs/sit_gif.gif"
-     alt="Surface Vision Transformers"
-     style="float: left; margin-right: 10px;" />
+---
 
-# Outline
+## Repository structure
 
-This repository list the instructions to access preprocessed cortical data for regression, classification and segmentation tasks; and to train *SiT* and *MS-SiT* models.
-
-<p><a href="#updates">1. Updates</a></p>
-<p><a href="#install">2. Installation & Set-up</a></p>
-<p><a href="#data">3. Accessing data</a></p>
-<p><a href="#training">4. Training & Inference</a></p>
-
-Here, Surface Vision Transformer (**SiT**) is applied on cortical data for phenotype predictions.
-
-
-
-# 1. Updates 
-<a id="updates"></a>
-
-<details>
-    <summary><b> V.3.1 - 24.09.24</b></summary>
-    Minor codebase update - 24.09.24
-    <ul type="circle">
-        <li> Updating pre-training script for Masked Patch Pre-training (MPP)</li>
-    </ul>
-</details>
-
-
-<details>
-    <summary><b> 🔥 V.3.0 - 19.09.24</b></summary>
-    Major codebase update - 18.09.24
-    <ul type="circle">
-        <li> Adding MS-SiT segmentation codebase</li>
-        <li> Adding metrics files dataloader for SiT and MS-SiT models (numpy loader stil available)</li>
-        <li> Update GIN repository for dHCP access </li>
-        <li> Adding new GIN repository with MindBoggle dataset</li>
-    </ul>
-</details>
-
-<details>
-    <summary><b> V.2.0 - 22.07.24</b></summary>
-    Major codebase update - 22.07.24
-    <ul type="circle">
-        <li> Adding MS-SiT model into the codebase</li>
-    </ul>
-</details>
-
-<details>
-    <summary><b> V.1.1 - 12.02.24</b></summary>
-    Major codebase update - 12.02.24
-    <ul type="circle">
-        <li> Adding masked patch pretraining code to codebase</li>
-        <li> can be run as simply as with: python pretrain.py ../config/SiT/pretraining/mpp.yml </li>
-    </ul>
-</details>
-
-
-<details>
-    <summary><b> V.1.0 - 18.07.22</b></summary>
-    Major codebase update - 18.07.22
-    <ul type="circle">
-        <li> birth age and scan age prediction tasks</li>
-        <li> simplifying training script </li>
-        <li> adding birth age prediction script </li>
-        <li> simplifying preprocessing script </li>
-        <li> ingle config file tasks (scan age / birth age) and data configurations (template / native)</li>
-        <li> adding mesh indices to extract non-overlapping triangular patches from a cortical mesh ico 6 sphere representation</li>
-    </ul>
-</details>
-
-<details>
-    <summary><b> V.0.2</b></summary>
-    Update - 25.05.22
-    <ul type="circle">
-        <li> testing file and config </li>
-        <li> installation guidelines </li>
-        <li> data access </li>
-    </ul>
-</details>
-
-<details>
-    <summary><b> V.0.1</b></summary>
-    Initial commits - 12.10.21
-    <ul type="circle">
-        <li> training script </li>
-        <li> README </li>
-        <li> config file for training </li>
-    </ul>
-</details>
-
-# 2. Installation & Set-up 
-<a id="install"></a>
-
-## a. Connectome Workbench
-
-Connectome Workbench is a free software for visualising neuroimaging data and can be used for visualising cortical metrics on surfaces. Downloads and instructions [here](https://www.humanconnectome.org/software/connectome-workbench). 
-
-## b. Conda usage
-
-For PyTorch and dependencies installation with conda, please follow instructions in [install.md](docs/install.md).
-
-## c. Docker usage
-
-**Coming soon**
-
-For docker support, please follow instructions in [docker.md](docs/docker.md)
-
-
-# 3. Accessing data
-<a id="data"></a>
-
-## a. dHCP pre-processed dataset - regression
-
-
-The data used in these projects for regression tasks are cortical metrics (cortical thickness, curvature, myelin maps and sulcal depth maps) from the [dHCP dataset](http://www.developingconnectome.org/). Instructions for processing MRI scans and extract cortical metrics can be found in [S. Dahan et al 2021](https://arxiv.org/abs/2203.16414) and references cited in.
-
-To simplify reproducibility of the work, data has been already pre-processed (compiled into **numpy array** or into raw **gifti** files) and is made available following the next guidelines. 
-
-### Accessing pre-processed data
-
-Cortical surface metrics (cortical thickness, curvature, myelin maps and sulcal depth maps) already processed as in [S. Dahan et al 2021](https://arxiv.org/abs/2203.16414) and [A. Fawaz et al 2021](https://www.biorxiv.org/content/10.1101/2021.12.01.470730v1) are available upon request. 
-
-<details open>
-    <summary><b> Sign dHCP access agreement</b></summary>
-    <p>
-    To access the data please:
-    <br>
-        <ul type="circle">
-            <li>Sign in <a href="https://data.developingconnectome.org/app/template/Login.vm">here</a> </li>
-            <li>Sign the dHCP open access agreement </li>
-            <li> Forward the confirmation email to <b> simon.dahan@kcl.ac.uk</b>  </li>
-        </ul>
-    </p>
-</details>
-
-<details open>
-    <summary><b> Create a G-Node GIN account</b></summary>
-    <p>
-    Please create an account on the GIN plateform <a href="https://gin.g-node.org/">here</a> 
-    </p>
-</details>
-
-<details open>
-  <summary><b> Get access to the G-Node GIN repository</b></summary>
-      <p>
-      <ul type="circle">
-            <li>Please also share your G-Node username to <b> simon.dahan@kcl.ac.uk</b> </li>
-            <li> Then, you will to be added to this repository <a href="https://gin.g-node.org/Sdahan30/slcn_2023">SLCN 2023</a></li>
-        </ul>
-      </p>
-</details>
-
-<br></br>
-
-**Training**, **validation** and **testing** sets are available, as used in as in [S. Dahan et al 2021](https://arxiv.org/abs/2203.16414) and [A. Fawaz et al 2021](https://www.biorxiv.org/content/10.1101/2021.12.01.470730v1), for the task of **birth-age** (gestational age -  GA) and **scan-age** (postmenstrual age at scan - PMA) prediction, in **template** and **native** configurations.
-
-dHCP data has been resampled to ico6 (40k vertices) resolution. Left and right hemispheres are symmetrised, see image below. 
-
-<img src="./docs/left_right_example.png"
-     alt="Left/Right hemispheres"
-     style="float: left; margin-right: 10px;" />
-
-Important, the dHCP data is accessible in two format: numpy and gifti format. 
-
-### Numpy format
-
-In numpy format, the surface data is already patched (as explained in [S. Dahan et al 2021](https://arxiv.org/abs/2203.16414)) with ico2 grid, and compiled into train, validation and test arrays. Each array has a shape of: `(B,N,C,V)`with B the number of subjects, N the number of patches (320), C the number of input channels (4) and V the number of verticse per patch (153).
-
-### Gifti format
-
-We also make available gifti files with the different cortical metrics merged per subject and per hemisphere. For instance, `sub-CC00051XX02_ses-7702_L.shape.gii` contains the 4 cortical metrics merged into a single file at the ico6 (40k vertices) resolution. 
-
-This data format is more flexible for futher post-processing (if needed) but also to build more complex dataloading strategies (with data augmentations for instance, see below xx). 
-
- 
-## b. MindBoggle dataset - segmentation 
-
-The MindBoggle dataset with cortical metrics (sulcal depth and curvature) has been further pre-processed with MSMSulc alignement and resampling to ico6 resolution (40k vertices). 
-
-### Accessing pre-processed data
-
-Pre-processed MindBoggle data is available in the following G-Node GIN repository: <a href="https://gin.g-node.org/Sdahan30/MindBoggle-preprocessed">MindBoggle processed dataset</a>.
-
-
- Please create an account and forward your username at **simon.dahan@kcl.ac.uk** to be added to the repository and access the data. 
-
-<img src="./docs/mindboggle.png"
-     alt="MindBoggle dataset"
-     style="float: left; margin-right: 10px;" />
-
-<br></br>
-
-# 4. Training & Inference
-<a id="training"></a>
-
-This repository is thought as a modular framework. Most of the models and training hyperparameters can be set within config files, used as input to the training scripts. Training scripts are located within the `tools/` folder.
-
-## Training SiT/MS-SiT for regression tasks
-
-Once in the `tools` folder, one can start training an SiT or MS-SiT model with the following command:
-```
-python train.py ../config/SiT/training/hparams.yml
-```
-
-or 
+Folders and files named `LEGACY` / `-LEGACY` are left out. They hold code from the original SiT/MS-SiT fork that isn't part of the active pipeline.
 
 ```
-python train.py ../config/MS-SiT/training/hparams.yml
+SiT_structural_encoder/
+├── config/
+│   └── hparams_recon.yml                 # Hyperparameters for reconstruction training (model, optimiser, paths)
+├── models/
+│   └── sit_recon_encoder.py              # SiT encoder + transformer decoder (autoencoder)
+├── tools/
+│   └── reconstruction_pipeline_v2.py     # Main training / validation / test script
+├── utils/
+│   ├── brain_ico_downsample_and_save_raw.ipynb  # Builds patched train/val/test .npy arrays from ico6 GIFTIs
+│   ├── utils.py                          # Dataloaders, demeaning, per-subject correlation, GIFTI + scatter helpers
+│   ├── recon_save_as_gifti.py            # Runs a trained model on the test set; saves high/median/low recons
+│   ├── reinflate_recon.sh                # SLURM: runs recon_save_as_gifti.py, then resamples outputs to HCP 32k sphere
+│   ├── demean_pipeline.py                # Saves one subject at each demeaning stage (for inspection)
+│   ├── demeaning_snapshot.sh             # SLURM: runs demean_pipeline.py, then resamples to HCP 32k sphere
+│   └── TESTING/                          # Scratch notebooks (recon-TESTING, demean-TESTING)
+├── patch_extraction/
+│   └── triangle_indices_ico_6_sub_ico_{1..5}.csv  # ico6 vertex indices per sub-ico patch
+├── surfaces/
+│   ├── ico-{0..6}.L.surf.gii, ico-6.R.surf.gii    # Template icospheres
+│   ├── img_indices_40962.npy, img_weights_40962.npy
+│   └── metric_resample.py, metric_resample_labels.py  # Sphere resampling helpers (not used by the active pipeline)
+├── launchpad.sh                          # SLURM: launches reconstruction_pipeline_v2.py
+├── requirements.txt
+├── weekly_log.md                         # Development log
+└── README.md                             # Original upstream SiT README
 ```
 
-Where all hyperparameters for training and model design models are to be set in the yaml file `config/SiT/training/hparams.yml` and `config/MS-SiT/training/hparams.yml`, such as: 
+---
 
-- Transformer architecture
-- Training strategy: from scratch, ImageNet or SSL weights
-- Optimisation strategy
-- Patching configuration
-- Logging
+## Setup & dependencies
 
-One important point, as explained previously in the dHCP section, data is available either in *numpy* or *gifti*  format. The parameter `data/loader` in the config files should be set accordingly. 
-
-## Training MS-SiT for segmentation tasks
-
-The MS-SiT model can be used to train segmentation model as follows:
+`requirements.txt` lists:
 
 ```
-python train_segmentation.py ../config/MS-SiT/segmentation/hparams.yml
-```
-Here, only the `metrics` dataloader is available.
-
-# Tensorboard support
-
-**Coming soon**
-
-# References 
-
-This codebase uses the vision transformer implementation from  
-[lucidrains/vit-pytorch](https://github.com/lucidrains/vit-pytorch) and the pre-trained ViT models from the [*timm*](https://github.com/rwightman/pytorch-image-models) librairy. 
-
-# Citation
-
-Please cite these works if you found it useful:
-
-[Surface Vision Transformers: Attention-Based Modelling applied to Cortical Analysis](https://arxiv.org/abs/2203.16414)
-
-```
-@InProceedings{pmlr-v172-dahan22a,
-  title = 	 {Surface Vision Transformers: Attention-Based Modelling applied to Cortical Analysis},
-  author =       {Dahan, Simon and Fawaz, Abdulah and Williams, Logan Z. J. and Yang, Chunhui and Coalson, Timothy S. and Glasser, Matthew F. and Edwards, A. David and Rueckert, Daniel and Robinson, Emma C.},
-  booktitle = 	 {Proceedings of The 5th International Conference on Medical Imaging with Deep Learning},
-  pages = 	 {282--303},
-  year = 	 {2022},
-  editor = 	 {Konukoglu, Ender and Menze, Bjoern and Venkataraman, Archana and Baumgartner, Christian and Dou, Qi and Albarqouni, Shadi},
-  volume = 	 {172},
-  series = 	 {Proceedings of Machine Learning Research},
-  month = 	 {06--08 Jul},
-  publisher =    {PMLR},
-  pdf = 	 {https://proceedings.mlr.press/v172/dahan22a/dahan22a.pdf},
-  url = 	 {https://proceedings.mlr.press/v172/dahan22a.html},
-}
-
+pyyaml
+timm
+pandas
+einops
+vit-pytorch
+nibabel
+tensorboard
 ```
 
-[The Multiscale Surface Vision Transformers](https://arxiv.org/abs/2303.11909)
+```bash
+pip install -r requirements.txt
+```
+
+The active code also imports these packages, which are **not** in `requirements.txt`:
+
+| Package | Used in |
+| --- | --- |
+| `torch` | everywhere |
+| `numpy` | everywhere |
+| `scipy` | `utils/utils.py` (`stats.pearsonr(..., axis=1)`), `tools/reconstruction_pipeline_v2.py` |
+| `matplotlib`, `seaborn` | `utils/utils.py` |
+| `scikit-learn` | `brain_ico_downsample_and_save_raw.ipynb` (`train_test_split`) |
+
+TODO: pin versions and add the missing packages to `requirements.txt`. TODO: state the Python version (the `__pycache__` files suggest CPython 3.12).
+
+**External tools:**
+- [Connectome Workbench](https://www.humanconnectome.org/software/connectome-workbench) (`wb_command`). The two `.sh` scripts load it with `module load workbench`.
+- The `.sh` scripts are SLURM batch scripts written for the WashU CHPC cluster (`--partition=tier2_cpu`, `--account=janine_bijsterbosch`).
+
+**Hard-coded paths:** most scripts point at absolute CHPC paths under `/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/...`. Running anywhere else means editing them (see [Known limitations](#known-limitations)).
+
+---
+
+## Data requirements
+
+- **Source:** HCP-YA (S1200), left hemisphere only.
+- **Input to preprocessing** (under `data_path` = `.../lucas_scratch/HCP_YA`):
+  - `resampled_icos/<subject_id>/<subject_id>_ico6.L.shape.gii`: per-subject metric already resampled to ico6 (40,962 vertices). TODO: document which script produced these and which metric they hold (`reinflate_recon.sh` labels its outputs `corrThickness`).
+  - `unrestricted_hcp_freesurfer.csv`: the first two columns are used as `[subject_id, sex]`.
+  - `HCP_YA_subjects_2026_10_22_12_06_42.csv`: restricted HCP data; columns `[0, 5, 6, 7]` are read as `[subject_id, family_id, mother_id, father_id]`.
+- **For reinflation:** native HCP spheres at `/ceph/chpc/rcif_datasets/hcpya/S1200/<id>/MNINonLinear/fsaverage_LR32k/<id>.L.sphere.32k_fs_LR.surf.gii`.
+
+HCP restricted data has access rules. Don't commit any data files (`data/*` is already in `.gitignore`).
+
+---
+
+## Pipeline overview
 
 ```
-@misc{dahan2024multiscalesurfacevisiontransformer,
-      title={The Multiscale Surface Vision Transformer}, 
-      author={Simon Dahan and Logan Z. J. Williams and Daniel Rueckert and Emma C. Robinson},
-      year={2024},
-      eprint={2303.11909},
-      archivePrefix={arXiv},
-      primaryClass={eess.IV},
-      url={https://arxiv.org/abs/2303.11909}, 
-}
+ico6 .shape.gii per subject
+        │  utils/brain_ico_downsample_and_save_raw.ipynb
+        ▼
+{train,validation,test}_L_{data,labels,subjects}.npy   (data: [B, 1, 320, 153])
+        │  tools/reconstruction_pipeline_v2.py   (via launchpad.sh)
+        ▼
+<logs>/<date>-epoch_..-LR_..-dims_..-optim_../  best_model.pth, model_final.pth, hparams.yml, tensorboard events
+        │  utils/reinflate_recon.sh  →  utils/recon_save_as_gifti.py
+        ▼
+high / median / low-correlation recon, target, delta  →  ico6 .shape.gii  →  32k_fs_LR .shape.gii (view in Workbench)
 ```
+
+## Usage
+
+### 1. Build patched train/val/test arrays
+
+Open and run `utils/brain_ico_downsample_and_save_raw.ipynb` from top to bottom. Edit `data_path` and `patch_extraction_path` in cell 3 if needed. The notebook:
+
+1. Lists the numeric subject folders in `resampled_icos/`.
+2. Splits **by family**: 70% train, then the remainder split evenly into test and validation (`preprocess_and_sort(scans_ids, family_data, 0.7, 0.15)`), so siblings and twins never cross splits. `train_test_split` isn't seeded, so the split changes on every run.
+3. Patches each subject's ico6 data onto the ico2 grid (320 patches × 153 vertices) using `patch_extraction/triangle_indices_ico_6_sub_ico_2.csv`.
+4. Saves the following to `data_path`:
+   - `{train,validation,test}_L_data.npy`: shape `[N, 1, 320, 153]`
+   - `{train,validation,test}_L_labels.npy`: sex (1 = F), shape `[N, 1]` (loaded but not used for reconstruction)
+   - `{train,validation,test}_L_subjects.npy`: HCP subject IDs, shape `[N, 1]`
+
+The saved output shows 1113 subjects → train 772 / test 167 / validation 174.
+
+### 2. Train the autoencoder
+
+On the cluster:
+
+```bash
+sbatch launchpad.sh
+```
+
+This `cd`s into `tools/` and runs:
+
+```bash
+python3 ./reconstruction_pipeline_v2.py --config ../config/hparams_recon.yml
+```
+
+Run it from `tools/`: the script adds `./` and `../` to `sys.path` to import `models.` and `utils.`. `--config` defaults to `../config/hparams_recon.yml`.
+
+### 3. Export and reinflate reconstructions for visualization
+
+Edit `recon_dir` (output folder) and `model_path` (a training run folder containing `best_model.pth` and `hparams.yml`) at the top of `utils/reinflate_recon.sh`, then run it from `utils/`:
+
+```bash
+cd utils
+sbatch reinflate_recon.sh
+```
+
+The script calls:
+
+```bash
+python3 ./recon_save_as_gifti.py --out_dir "<recon_dir>" --model_dir "<model_path>"
+```
+
+It then uses `wb_command -metric-resample ... BARYCENTRIC` to resample the ico6 GIFTIs onto each subject's native HCP `32k_fs_LR` sphere, and copies that subject's sphere and midthickness surfaces into the output folder so they can be viewed in Workbench.
+
+### Optional: inspect demeaning on one subject
+
+```bash
+cd utils
+sbatch demeaning_snapshot.sh     # edit `index` and `output_dir` inside first
+# runs: python3 ./demean_pipeline.py --out_dir <output_dir> --subject_index_get <index>
+```
+
+This saves the chosen test subject at three stages (raw, per-subject normalized, then fully demeaned against the train vertex-wise mean) and resamples each one to the 32k sphere.
+
+---
+
+## Priority files
+
+### `utils/brain_ico_downsample_and_save_raw.ipynb`
+- **Purpose:** preprocessing. Downsamples/patches ico6 surface metrics onto the ico2 patch grid and writes family-aware train/val/test splits.
+- **Inputs:** `resampled_icos/<id>/<id>_ico6.L.shape.gii`, the two HCP CSVs listed above, and `triangle_indices_ico_6_sub_ico_2.csv`.
+- **Outputs:** the nine `*_L_{data,labels,subjects}.npy` files in `data_path`.
+- **Key function:** `preprocess_and_sort(ids, family_ids, train_split, test_split)`.
+
+### `models/sit_recon_encoder.py`
+- **Purpose:** defines `SiT`, a ViT-style surface autoencoder.
+- **Encoder (`encode`):** `[B, C, N, V]` → patch linear embedding → prepend CLS token + learned positional embedding → `vit_pytorch.vit.Transformer` (`depth`) → CLS token (or mean, with `pool='mean'`) → `LayerNorm` + `Linear` → latent `[B, latent_dim]`.
+- **Decoder (`decode`):** latent → `Linear` to `dim` → concatenated after `num_patches` learned query tokens + decoder positional embedding → `Transformer` (`dec_depth`) → drop the latent token → `Linear` to `patch_dim` → reshape to `[B, 1, N, V]`.
+- **`forward(x)`:** `decode(encode(x))`.
+- With the default config (`dim 192`, `depth 12`, `dec_depth 4`, `heads 6`, `latent_dim 768`, ico2 grid), the input is `[B, 1, 320, 153]` and the latent is 768-d.
+
+### `tools/reconstruction_pipeline_v2.py`
+- **Purpose:** trains, validates and tests the autoencoder on reconstruction (target = input).
+- **Inputs:** `--config` YAML. Data comes from `get_dataloaders()` in `utils/utils.py`.
+- **Loss:** `mse` or `l1` (`training.loss`). **Optimisers:** `Adam`, `AdamW`, `SGD`.
+- **Metrics:** MAE and mean per-subject Pearson correlation (`calculate_correlation`), logged to TensorBoard as `loss/`, `mae/`, `corr/` × `train`/`val`.
+- **Validation:** every `val_epoch` epochs and on the last epoch. The best model is chosen by **lowest val MAE**.
+- **Outputs**, in `<folder_to_save_model>/<YYYY-MM-DD-HH:MM:SS>-epoch_<E>-LR_<LR>-dims_<dim>-optim_<opt>/`:
+  - `best_model.pth`: best-val-MAE weights (plain `state_dict`)
+  - `model_final.pth`: last-epoch weights
+  - `hparams.yml`: the config plus a `results` block (`best_mae`, `best_corr`, `best_epoch`, `test_accuracy` [= test MAE], `test_correlation`)
+  - TensorBoard event files
+- Reloads `best_model.pth` at the end and prints test MAE and correlation.
+
+### `utils/recon_save_as_gifti.py`
+- **Purpose:** runs a trained model on the test set, ranks subjects by reconstruction correlation, and exports the highest, median and lowest subjects.
+- **CLI:** `--out_dir` (required), `--model_dir` (required; must contain `best_model.pth` and `hparams.yml`).
+- **Outputs** (in `--out_dir`):
+  - `bulk_data/targets_data.npy`, `predicted_data.npy`, `subjects_data.npy`, `subject_correlations.csv`
+  - `recons_snapshot/{high,median,low}_{target,recon,delta}_subj-<id>-.npy`, plus a scatter plot `{name}_correlation_subj-<id>-` (written by `display_single_scatter`)
+  - `original_*`, `reconstructed_*`, `recon_delta_*` `.L.shape.gii` at ico6 (40,962 vertices), written at the top level of `--out_dir` by `save_reconstruction_mae_test`
+
+### `utils/reinflate_recon.sh`
+- **Purpose:** SLURM wrapper around `recon_save_as_gifti.py`, followed by Workbench resampling to native HCP space.
+- **Inputs:** `recon_dir` and `model_path` (set inside the script), `surfaces/ico-6.L.surf.gii`, and the HCP S1200 per-subject 32k spheres.
+- **Outputs:** in `recon_dir`, `<prefix>_<id>_corrThickness_32k_fs.L.shape.gii` plus that subject's `L.sphere` and `L.midthickness` 32k surfaces. The original ico6 GIFTIs are moved to `recon_dir/original_icos/`.
+
+---
+
+## Supporting files (skimmed)
+
+- **`utils/utils.py`:** `demean()` (per-subject z-score, then subtract the train vertex-wise mean; **currently commented out** in `get_dataloaders`), `get_dataloaders()`, `calculate_correlation()`, `save_gifti()`, `save_reconstruction_mae_test()`, `display_single_scatter()`.
+- **`utils/demean_pipeline.py` / `utils/demeaning_snapshot.sh`:** see "Optional" above.
+- **`surfaces/metric_resample*.py`:** sphere resampling helpers from the upstream repo. The priority files don't import them.
+
+---
+
+## Results so far
+
+From `weekly_log.md` only. These haven't been re-verified in this README.
+
+- Without demeaning: about 0.92 per-subject correlation between reconstruction and target. Further inspection (`utils/TESTING/recon-TESTING.ipynb`) suggested the model **had learned the group mean** (near-identical reconstructions across subjects).
+- With per-vertex demeaning and per-subject normalization: training **did not converge** (correlation about 0.0).
+
+TODO: record the current best run (run folder, config, val/test MAE and correlation).
+
+---
+
+## Known limitations
+
+- **Left hemisphere only**, 1 channel. Right-hemisphere code is commented out.
+- **Hard-coded cluster paths.** `reconstruction_pipeline_v2.py` ignores `config['data']['path_to_workdir']` and uses a hard-coded `data_path`. `recon_save_as_gifti.py`, `utils.save_reconstruction_mae_test`, `demean_pipeline.py` and the notebook do the same.
+- **The non-seeded split** in the notebook means the train/val/test arrays can't be reproduced exactly.
+- **Demeaning is off.** `config.training.demeaned: True` isn't read anywhere, and the `demean(...)` call in `get_dataloaders` is commented out.
+- `get_dataloaders` uses `num_workers=16`, but `launchpad.sh` requests only 8 CPUs, on a CPU partition (`tier2_cpu`) with no GPU.
+- The model's decoder always reshapes its output to 1 channel, whatever `num_channels` is.
+
+---
+
+## Credits
+
+Built on the Surface Vision Transformer (Dahan et al., MIDL 2022) from [metrics-lab/surface-vision-transformers](https://github.com/metrics-lab/surface-vision-transformers), which uses [lucidrains/vit-pytorch](https://github.com/lucidrains/vit-pytorch). Citation details are in the original `README.md`.
