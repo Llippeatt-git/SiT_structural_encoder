@@ -76,6 +76,9 @@ High-level development log.
 - added in-file documentation to `brain_ico_downsample_and_save_raw`, `reconstruction_pipeline_v2`, `recon_save_as_gifti`, and `utils`
 - updated `README.md`
 
+## 23 Nov - 25 Nov 2026:
+
+
 ---
 
 ## Files referenced
