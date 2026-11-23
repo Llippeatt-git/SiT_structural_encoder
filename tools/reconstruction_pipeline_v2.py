@@ -48,6 +48,9 @@ def individual_correlation(targets, preds, group_mean):
     target and prediction. Unlike the raw correlation, this is ~0 for a model that
     only outputs the group mean, so it measures whether individual differences
     (what the latent needs to carry for cross-modal translation) are reconstructed.
+    
+    ~ got from claude
+    
     '''
     t = [x - group_mean for x in targets]
     p = [x - group_mean for x in preds]

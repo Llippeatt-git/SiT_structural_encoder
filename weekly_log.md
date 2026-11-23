@@ -9,7 +9,7 @@ High-level development log.
 - [25 Oct – 31 Oct 2026: More reconstruction](#25-oct--31-oct-2026-more-reconstruction)
 - [1 Nov – 7 Nov 2026: Starting visualization](#1-nov--7-nov-2026-starting-visualization)
 - [8 Nov – 14 Nov 2026: Demeaning & taking point](#8-nov--14-nov-2026-demeaning--taking-point)
-- [19 Nov 2026: Readability and Organization](#19-nov-2026-readability-and-organization)
+- [19 Nov - 20 Nov 2026: Readability and Organization](#19-nov---20-nov-2026-readability-and-organization)
 
 
 
@@ -69,14 +69,17 @@ High-level development log.
   - `Demeaning_pipeline.py` selectively applies different steps of the demeaning process to a chosen subject's data, then saves it out as a CIFTI.
   - `Demeaning_snapshot.sh` adds structure to the file output, resamples it to brain structure, and stores it in a folder.
 
-## 19 Nov 2026: readability and organization
+## 19 Nov - 20 Nov 2026: readability and organization
 
 - renamed legacy code (from Dahan fork), making it clear which files we are actively working with and which we are just keeping in case they might prove useful
 - streamlined `reconstruction_pipeline_v2.py`, making config a parser prompt so we can change it from batch file, not the code 
 - added in-file documentation to `brain_ico_downsample_and_save_raw`, `reconstruction_pipeline_v2`, `recon_save_as_gifti`, and `utils`
-- updated `README.md`
+- updated `README.md` 
 
-## 23 Nov - 25 Nov 2026:
+## 23 Nov - 25 Nov 2026: finetuning
+
+- added LR warmup, cosine scheduling, and gradient clipping to reconstruction pipeline.
+- 
 
 
 ---
