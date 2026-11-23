@@ -42,7 +42,23 @@ from scipy.stats import pearsonr
 from utils.utils import get_dataloaders, calculate_correlation
 
 
+def individual_correlation(targets, preds, group_mean):
+    '''
+    Per-subject Pearson r after subtracting the train vertex-wise mean from BOTH
+    target and prediction. Unlike the raw correlation, this is ~0 for a model that
+    only outputs the group mean, so it measures whether individual differences
+    (what the latent needs to carry for cross-modal translation) are reconstructed.
+    '''
+    t = [x - group_mean for x in targets]
+    p = [x - group_mean for x in preds]
+    return np.nanmean(calculate_correlation(t, p))
+
+
 def train(config):
+
+    seed = config['training'].get('seed', 42)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
 
     #mesh_resolution
     ico_res = config['mesh_resolution']['ico_res']
@@ -92,8 +108,15 @@ def train(config):
     print(f'LOADING DATA: ICO {ico_res} - sub-res ICO {ico_down_res}')
 
 
-    data_path = "/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/HCP_YA"
+    data_path = config['data']['path_to_workdir']
     train_loader, val_loader, test_loader = get_dataloaders(data_path, config)
+
+    # Train vertex-wise mean [1, C, N, V]: the "group mean" a collapsed model would output.
+    group_mean = train_loader.dataset.tensors[0].mean(dim=0, keepdim=True).numpy()
+    val_inputs = val_loader.dataset.tensors[0].numpy()
+    baseline_val_mae = np.mean(np.abs(val_inputs - group_mean))
+    print(f'Baseline val MAE (predict train group mean for everyone): {baseline_val_mae:.6f}')
+    print('A model is only learning individual structure if it beats this.')
 
     ##############################
     ######      LOGGING     ######
@@ -149,7 +172,11 @@ def train(config):
 
     if config['training']['init_weights']=='recon':
         print('Loading weights from self-supervision training SiT')
-        model.load_state_dict(torch.load(os.path.join(config['training']['weights_source'],'best_model.pth'))['model_state_dict'],strict=True)
+        # this pipeline saves a plain state_dict; older checkpoints wrapped it in 'model_state_dict'
+        state = torch.load(os.path.join(config['training']['weights_source'],'best_model.pth'), map_location='cpu')
+        if 'model_state_dict' in state:
+            state = state['model_state_dict']
+        model.load_state_dict(state, strict=True)
     else:
         print('Training from scratch')
 
@@ -172,14 +199,54 @@ def train(config):
                                 lr=LR,
                                 weight_decay=config['AdamW']['weight_decay'])
     else:
-        raise('not implemented yet')
+        raise ValueError(f"optimiser '{config['optimisation']['optimiser']}' not implemented")
 
-    
+
 
     if loss == 'mse':
         criterion = nn.MSELoss(reduction='mean')
     elif loss == 'l1':
         criterion = nn.L1Loss(reduction='mean')
+    else:
+        raise ValueError(f"loss '{loss}' not implemented (use mse or l1)")
+
+
+
+    ###############################
+    #####     PRETRAINING     #####
+    ###############################
+
+    # gradient clipping (max global L2 norm); null/0 in config disables it
+    grad_clip = config['training'].get('grad_clip', None)
+
+    # LR schedule, stepped once per optimiser step (batch), not per epoch
+    sched_cfg = config.get('scheduler', {}) or {}
+    sched_name = sched_cfg.get('name', 'none')
+    steps_per_epoch = len(train_loader)
+    total_steps = epochs * steps_per_epoch
+
+    if sched_name == 'warmup_cosine':
+        warmup_steps = int(sched_cfg.get('warmup_epochs', 0) * steps_per_epoch)
+        min_lr_ratio = float(sched_cfg.get('min_lr', 0.0)) / LR
+
+        def lr_lambda(step):
+            # linear warmup 0 -> LR, then cosine decay LR -> min_lr
+            if step < warmup_steps:
+                return (step + 1) / warmup_steps
+            progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+            progress = min(progress, 1.0)
+            return min_lr_ratio + (1 - min_lr_ratio) * 0.5 * (1 + np.cos(np.pi * progress))
+
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        print(f'Using warmup + cosine schedule: {warmup_steps} warmup steps, '
+              f'{total_steps} total steps, min LR {sched_cfg.get("min_lr", 0.0)}')
+    elif sched_name == 'none':
+        scheduler = None
+        print('No LR scheduler (constant LR)')
+    else:
+        raise ValueError(f"scheduler '{sched_name}' not implemented (use warmup_cosine or none)")
+
+    print(f'Gradient clipping: {grad_clip if grad_clip else "off"}')
 
 
     print('Number of parameters: {:,}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
@@ -209,6 +276,7 @@ def train(config):
         targets_ = []
         preds_ = []
         train_loss_sum = 0.0
+        grad_norm_sum = 0.0
 
         for i, data in enumerate(train_loader):
             inputs, labels, _ = data[0].to(device).float(), data[1].to(device).float(), data[2].to(device).float()
@@ -219,7 +287,16 @@ def train(config):
             loss_value = criterion(outputs, inputs)
 
             loss_value.backward()
+
+            if grad_clip:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+            else:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=float('inf'))  # just measures
+            grad_norm_sum += grad_norm.item()
+
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
 
             train_loss_sum += loss_value.item()
 
@@ -230,11 +307,15 @@ def train(config):
         train_loss = train_loss_sum / (i + 1)
         train_mae = np.mean(np.abs(np.concatenate(targets_)- np.concatenate(preds_)))
 
-        train_corr = calculate_correlation(targets_, preds_).mean()
+        train_corr = np.nanmean(calculate_correlation(targets_, preds_))
+        train_corr_ind = individual_correlation(targets_, preds_, group_mean)
 
         writer.add_scalar('loss/train', train_loss, epoch + 1)
         writer.add_scalar('mae/train', train_mae, epoch + 1)
         writer.add_scalar('corr/train', train_corr, epoch + 1)
+        writer.add_scalar('corr_individual/train', train_corr_ind, epoch + 1)
+        writer.add_scalar('lr', optimizer.param_groups[0]['lr'], epoch + 1)
+        writer.add_scalar('grad_norm/train', grad_norm_sum / (i + 1), epoch + 1)  # mean pre-clip norm
 
         # ---------------- VALIDATION ----------------
         if (epoch + 1) % val_epoch == 0 or epoch == epochs - 1:
@@ -267,20 +348,24 @@ def train(config):
 
 
             ## mean of subject-level correlations
-            val_corr = calculate_correlation(val_targets_, val_preds_).mean()
-            
+            val_corr = np.nanmean(calculate_correlation(val_targets_, val_preds_))
+            val_corr_ind = individual_correlation(val_targets_, val_preds_, group_mean)
+
             writer.add_scalar('loss/val', val_loss, epoch + 1)
             writer.add_scalar('mae/val', val_mae, epoch + 1)
             writer.add_scalar('corr/val', val_corr, epoch + 1)
+            writer.add_scalar('corr_individual/val', val_corr_ind, epoch + 1)
 
             print(
                 f'Epoch {epoch + 1}/{epochs} | '
                 f'Train loss: {train_loss:.6f} | '
                 f'Train MAE: {train_mae:.6f} | '
                 f'Train corr: {train_corr:.6f} | '
+                f'Train indiv corr: {train_corr_ind:.6f} | '
                 f'Val loss: {val_loss:.6f} | '
-                f'Val MAE: {val_mae:.6f} | '
-                f'Val corr: {val_corr:.6f}'
+                f'Val MAE: {val_mae:.6f} (baseline {baseline_val_mae:.6f}) | '
+                f'Val corr: {val_corr:.6f} | '
+                f'Val indiv corr: {val_corr_ind:.6f}'
             )
 
             # Save the best model
@@ -309,10 +394,13 @@ def train(config):
     config['results']['best_mae'] = float(best_mae)
     config['results']['best_corr'] = float(best_corr)
     config['results']['best_epoch'] = best_epoch
-    config['results']['training_finished'] = False 
+    config['results']['baseline_val_mae'] = float(baseline_val_mae)
+    config['results']['training_finished'] = True
 
     with open(os.path.join(folder_to_save_model,'hparams.yml'), 'w') as yaml_file:
         yaml.dump(config, yaml_file)
+
+    writer.close()
 
     # This file intentionally represents the last epoch, not the best.
     torch.save(
@@ -350,7 +438,7 @@ def train(config):
             emb_dropout=config['transformer']['emb_dropout'])
         
     print('**** loading checkpoint ****')
-    test_model.load_state_dict(torch.load(os.path.join(folder_to_save_model,'best_model.pth')))
+    test_model.load_state_dict(torch.load(os.path.join(folder_to_save_model,'best_model.pth'), map_location=device))
 
     test_model.to(device)
 
@@ -374,12 +462,14 @@ def train(config):
 
 
         ## correlation code
-        test_corr = calculate_correlation(test_targets_, test_preds_).mean()
+        test_corr = np.nanmean(calculate_correlation(test_targets_, test_preds_))
+        test_corr_ind = individual_correlation(test_targets_, test_preds_, group_mean)
 
-        print('| TESTING RESULTS | MAE - {:.4f} | Corr - {:.4f}'.format( test_mae , test_corr))
+        print('| TESTING RESULTS | MAE - {:.4f} | Corr - {:.4f} | Indiv corr - {:.4f}'.format(test_mae, test_corr, test_corr_ind))
 
         config['results']['test_accuracy'] = float(test_mae)
         config['results']['test_correlation'] = float(test_corr)
+        config['results']['test_individual_correlation'] = float(test_corr_ind)
 
         with open(os.path.join(folder_to_save_model,'hparams.yml'), 'w') as yaml_file:
             yaml.dump(config, yaml_file)

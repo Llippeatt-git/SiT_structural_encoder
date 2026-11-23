@@ -17,7 +17,7 @@ logging:
   folder_to_save_recons: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/logs/SiT/recons
 
 training:
-  LR: 0.005
+  LR: 0.0001
   bs: 32
   bs_val: 1 #always 1
   epochs: 100
@@ -26,6 +26,8 @@ training:
   demeaned: True
   val_epoch: 2
   init_weights: False
+  seed: 42
+  grad_clip: 1.0   # max global grad L2 norm; null to disable
   weights_source: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/logs/SiT/best_run_reconsit
   
 transformer:
@@ -56,7 +58,12 @@ SGD:
   momentum: 0.9
   nesterov: False
   
-StepLR: 
+scheduler:
+  name: warmup_cosine   # warmup_cosine, none
+  warmup_epochs: 5      # linear warmup from ~0 to LR
+  min_lr: 1.0e-6        # cosine floor at the final step (write as 1.0e-6, not 1e-6: PyYAML reads 1e-6 as a string)
+
+StepLR:
   stepsize: 1000
   decay: 0.5
 
