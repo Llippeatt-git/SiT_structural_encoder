@@ -15,6 +15,7 @@ data:
 logging:
   folder_to_save_model: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/logs/SiT
   folder_to_save_recons: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/logs/SiT/recons
+  experiment_log: /ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/SiT_structural_encoder/experiment_log.jsonl
 
 training:
   LR: 0.0001

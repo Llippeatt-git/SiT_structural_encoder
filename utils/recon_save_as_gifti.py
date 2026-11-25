@@ -7,6 +7,7 @@ import sys
 import torch
 from datetime import datetime
 import argparse
+import time
 
 sys.path.append('./')
 sys.path.append('../')
@@ -16,6 +17,7 @@ from einops import rearrange
 
 from models.sit_recon_encoder import SiT
 from utils import get_dataloaders, calculate_correlation, save_reconstruction_mae_test, display_single_scatter
+from experiment_log import log_experiment, hparam_summary, raise_on_sigterm, status_from_exception
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -30,7 +32,10 @@ inflated back into ico6, then brain
 '''
 
 
-def main(model_path, folder_to_save, config):
+def main(model_path, folder_to_save, config, run_record=None):
+    if run_record is None:
+        run_record = {}
+    metrics = run_record.setdefault('metrics', {})
     data_path = "/ceph/chpc/shared/janine_bijsterbosch_group/lucas_scratch/HCP_YA"
     ico_res = 6
     ico_down_res = 2
@@ -41,7 +46,9 @@ def main(model_path, folder_to_save, config):
         os.mkdir(bulk_data_folder)
         print('Creating folder: {}'.format(bulk_data_folder))
 
-    _, _, test_loader = get_dataloaders(data_path, config)
+    train_loader, _, test_loader = get_dataloaders(data_path, config)
+    # train vertex-wise mean, for the individual-differences correlation
+    group_mean = train_loader.dataset.tensors[0].mean(dim=0, keepdim=True).numpy()
 
 
     test_model = SiT(dim=config['transformer']['dim'],
@@ -94,6 +101,17 @@ def main(model_path, folder_to_save, config):
         
         test_corr = calculate_correlation(test_targets_, test_preds_)
 
+        test_corr_ind = calculate_correlation([x - group_mean for x in test_targets_],
+                                              [x - group_mean for x in test_preds_])
+
+        metrics['n_test'] = int(len(test_corr))
+        metrics['test_mae'] = float(test_mae)
+        metrics['test_corr_mean'] = float(np.nanmean(test_corr))
+        metrics['test_corr_median'] = float(np.nanmedian(test_corr))
+        metrics['test_corr_min'] = float(np.nanmin(test_corr))
+        metrics['test_corr_max'] = float(np.nanmax(test_corr))
+        metrics['test_corr_individual'] = float(np.nanmean(test_corr_ind))
+
         df = pd.DataFrame({'subject': np.arange(len(test_corr)), 'corr': test_corr})
         df.to_csv(f'{bulk_data_folder}/subject_correlations.csv', index=False)
 
@@ -113,7 +131,8 @@ def main(model_path, folder_to_save, config):
         for name, i in metadata:
 
             idx = int(df_sorted.iloc[i].subject)
-            print(f"{name} correlation {df_sorted.iloc[-1].corr}, found at id {idx}")
+            corr_value = float(df_sorted.iloc[i]['corr'])
+            print(f"{name} correlation {corr_value}, found at id {idx}")
         
             target_brain_data = t[idx]
             recon_brain_data = p[idx]
@@ -121,6 +140,8 @@ def main(model_path, folder_to_save, config):
 
             subject = s[idx][0]
             print(subject)
+            metrics[f'{name}_subject'] = int(subject)
+            metrics[f'{name}_corr'] = corr_value
 
             np.save(f"{specific_recons}/{name}_target_subj-{subject}-.npy", target_brain_data)
             np.save(f"{specific_recons}/{name}_recon_subj-{subject}-.npy", recon_brain_data)
@@ -156,4 +177,24 @@ if __name__ == "__main__":
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
-    main(model_path, out_dir, config)
+    # One record per run goes to experiment_log.jsonl, including failed/killed runs.
+    run_record = {
+        'run_type': 'test_export',
+        'status': 'running',
+        'model_dir': os.path.abspath(model_path),
+        'out_dir': os.path.abspath(out_dir),
+        'hparams': hparam_summary(config),
+        'metrics': {},
+    }
+    raise_on_sigterm()
+    start = time.time()
+    try:
+        main(model_path, out_dir, config, run_record)
+        run_record['status'] = 'completed'
+    except BaseException as e:
+        run_record['status'] = status_from_exception(e)
+        run_record['error'] = f'{type(e).__name__}: {e}'
+        raise
+    finally:
+        run_record['duration_s'] = round(time.time() - start, 1)
+        log_experiment(run_record, config.get('logging', {}).get('experiment_log'))

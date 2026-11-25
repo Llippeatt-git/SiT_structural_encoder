@@ -22,6 +22,7 @@ import os
 import argparse
 import yaml
 import sys
+import time
 #import timm
 from datetime import datetime
 
@@ -40,6 +41,8 @@ from torch.utils.tensorboard import SummaryWriter
 from scipy.stats import pearsonr
 
 from utils.utils import get_dataloaders, calculate_correlation
+from utils.experiment_log import (log_experiment, hparam_summary,
+                                  raise_on_sigterm, status_from_exception)
 
 
 def individual_correlation(targets, preds, group_mean):
@@ -57,7 +60,14 @@ def individual_correlation(targets, preds, group_mean):
     return np.nanmean(calculate_correlation(t, p))
 
 
-def train(config):
+def train(config, run_record=None):
+    '''
+    run_record: dict filled in as training progresses (run dir, metrics). The caller
+    appends it to experiment_log.jsonl, so partial results survive a crash or timeout.
+    '''
+    if run_record is None:
+        run_record = {}
+    metrics = run_record.setdefault('metrics', {})
 
     seed = config['training'].get('seed', 42)
     torch.manual_seed(seed)
@@ -121,6 +131,11 @@ def train(config):
     print(f'Baseline val MAE (predict train group mean for everyone): {baseline_val_mae:.6f}')
     print('A model is only learning individual structure if it beats this.')
 
+    metrics['baseline_val_mae'] = float(baseline_val_mae)
+    metrics['n_train'] = len(train_loader.dataset)
+    metrics['n_val'] = len(val_loader.dataset)
+    metrics['n_test'] = len(test_loader.dataset)
+
     ##############################
     ######      LOGGING     ######
     ##############################
@@ -144,6 +159,8 @@ def train(config):
 
 
     
+    run_record['run_dir'] = folder_to_save_model
+
     writer = SummaryWriter(log_dir=folder_to_save_model)
 
 
@@ -252,7 +269,9 @@ def train(config):
     print(f'Gradient clipping: {grad_clip if grad_clip else "off"}')
 
 
-    print('Number of parameters: {:,}'.format(sum(p.numel() for p in model.parameters() if p.requires_grad)))
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    metrics['n_params'] = n_params
+    print('Number of parameters: {:,}'.format(n_params))
     print('')
 
     print(f'Using {criterion} criterion')
@@ -270,6 +289,7 @@ def train(config):
     best_mae = float('inf')
     best_epoch = None
     best_corr = -1
+    best_corr_ind = None
 
     for epoch in range(epochs):
 
@@ -319,6 +339,14 @@ def train(config):
         writer.add_scalar('corr_individual/train', train_corr_ind, epoch + 1)
         writer.add_scalar('lr', optimizer.param_groups[0]['lr'], epoch + 1)
         writer.add_scalar('grad_norm/train', grad_norm_sum / (i + 1), epoch + 1)  # mean pre-clip norm
+
+        metrics['epochs_completed'] = epoch + 1
+        metrics['final_train_loss'] = float(train_loss)
+        metrics['final_train_mae'] = float(train_mae)
+        metrics['final_train_corr'] = float(train_corr)
+        metrics['final_train_corr_individual'] = float(train_corr_ind)
+        metrics['final_grad_norm'] = float(grad_norm_sum / (i + 1))
+        metrics['final_lr'] = float(optimizer.param_groups[0]['lr'])
 
         # ---------------- VALIDATION ----------------
         if (epoch + 1) % val_epoch == 0 or epoch == epochs - 1:
@@ -371,11 +399,22 @@ def train(config):
                 f'Val indiv corr: {val_corr_ind:.6f}'
             )
 
+            metrics['final_val_loss'] = float(val_loss)
+            metrics['final_val_mae'] = float(val_mae)
+            metrics['final_val_corr'] = float(val_corr)
+            metrics['final_val_corr_individual'] = float(val_corr_ind)
+
             # Save the best model
             if val_mae < best_mae:
                 best_mae = val_mae
                 best_corr = val_corr
                 best_epoch = epoch + 1
+                best_corr_ind = val_corr_ind
+
+                metrics['best_epoch'] = best_epoch
+                metrics['best_val_mae'] = float(best_mae)
+                metrics['best_val_corr'] = float(best_corr)
+                metrics['best_val_corr_individual'] = float(best_corr_ind)
 
                 torch.save(
                     model.state_dict(),
@@ -474,6 +513,10 @@ def train(config):
         config['results']['test_correlation'] = float(test_corr)
         config['results']['test_individual_correlation'] = float(test_corr_ind)
 
+        metrics['test_mae'] = float(test_mae)
+        metrics['test_corr'] = float(test_corr)
+        metrics['test_corr_individual'] = float(test_corr_ind)
+
         with open(os.path.join(folder_to_save_model,'hparams.yml'), 'w') as yaml_file:
             yaml.dump(config, yaml_file)
 
@@ -491,5 +534,24 @@ if __name__ == '__main__':
     with open(config_file) as f:
         config = yaml.safe_load(f)
           
-    # Call training
-    train(config)
+    # One record per run goes to experiment_log.jsonl, including failed/killed runs.
+    run_record = {
+        'run_type': 'train',
+        'status': 'running',
+        'config_file': os.path.abspath(config_file),
+        'run_dir': None,
+        'hparams': hparam_summary(config),
+        'metrics': {},
+    }
+    raise_on_sigterm()
+    start = time.time()
+    try:
+        train(config, run_record)
+        run_record['status'] = 'completed'
+    except BaseException as e:
+        run_record['status'] = status_from_exception(e)
+        run_record['error'] = f'{type(e).__name__}: {e}'
+        raise
+    finally:
+        run_record['duration_s'] = round(time.time() - start, 1)
+        log_experiment(run_record, config.get('logging', {}).get('experiment_log'))

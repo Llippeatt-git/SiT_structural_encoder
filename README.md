@@ -34,6 +34,7 @@ SiT_structural_encoder/
 │   ├── ico-{0..6}.L.surf.gii, ico-6.R.surf.gii    # Template icospheres
 │   ├── img_indices_40962.npy, img_weights_40962.npy
 │   └── metric_resample.py, metric_resample_labels.py  # Sphere resampling helpers (not used by the active pipeline)
+├── experiment_log.jsonl                  # Created on first run: one JSON line per train/test run (see utils/experiment_log.py)
 ├── launchpad.sh                          # SLURM: launches reconstruction_pipeline_v2.py
 ├── requirements.txt
 ├── weekly_log.md                         # Development log
@@ -215,6 +216,7 @@ This saves the chosen test subject at three stages (raw, per-subject normalized,
 ## Supporting files (skimmed)
 
 - **`utils/utils.py`:** `demean()` (per-subject z-score, then subtract the train vertex-wise mean; **currently commented out** in `get_dataloaders`), `get_dataloaders()`, `calculate_correlation()`, `save_gifti()`, `save_reconstruction_mae_test()`, `display_single_scatter()`.
+- **`utils/experiment_log.py`:** appends one JSON line per run of `reconstruction_pipeline_v2.py` (`run_type: train`) or `recon_save_as_gifti.py` (`run_type: test_export`) to `experiment_log.jsonl` at the repo root (override with `logging.experiment_log`). Each record holds the timestamp, SLURM job ID, status (`completed` / `failed` / `interrupted`), error, duration, run folder, key hyperparameters and metrics. Failed and timed-out runs are logged too. Load with `pd.json_normalize(pd.read_json('experiment_log.jsonl', lines=True).to_dict('records'))`.
 - **`utils/demean_pipeline.py` / `utils/demeaning_snapshot.sh`:** see "Optional" above.
 - **`surfaces/metric_resample*.py`:** sphere resampling helpers from the upstream repo. The priority files don't import them.
 
